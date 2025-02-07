@@ -1,0 +1,22 @@
+.ppe-estimator-wrapper {
+    border: 1px solid #ccc;
+    padding: 15px;
+    margin: 10px 0;
+    max-width: 600px;
+}
+
+.ppe-estimator-wrapper label {
+    display: block;
+    margin-top: 10px;
+    font-weight: bold;
+}
+
+.ppe-attribute-block {
+    margin: 10px 0;
+}
+
+#ppe_result_container {
+    margin-top: 20px;
+    font-size: 1.2em;
+    font-weight: bold;
+}
