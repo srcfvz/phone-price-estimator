@@ -12,7 +12,7 @@ class Phone_Price_Estimator {
 
     private static $instance = null;
 
-    // Define the table name suffixes (we'll create these on activation).
+    // Table name suffixes.
     public static $devices_table      = 'phone_price_estimator_devices';
     public static $attributes_table   = 'phone_price_estimator_attributes';
     public static $attr_options_table = 'phone_price_estimator_attribute_options';
@@ -27,11 +27,8 @@ class Phone_Price_Estimator {
         return self::$instance;
     }
 
-    /**
-     * Private constructor to enforce singleton.
-     */
     private function __construct() {
-        // Nothing special yet.
+        // Nothing special here.
     }
 
     /**
@@ -40,9 +37,10 @@ class Phone_Price_Estimator {
     public static function create_database_tables() {
         global $wpdb;
 
-        $devices_table   = $wpdb->prefix . self::$devices_table;
-        $attributes_table= $wpdb->prefix . self::$attributes_table;
-        $options_table   = $wpdb->prefix . self::$attr_options_table;
+        $devices_table    = $wpdb->prefix . self::$devices_table;
+        $attributes_table = $wpdb->prefix . self::$attributes_table;
+        $options_table    = $wpdb->prefix . self::$attr_options_table;
+        $criteria_table   = $wpdb->prefix . 'phone_price_estimator_criteria';
 
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
@@ -59,9 +57,11 @@ class Phone_Price_Estimator {
         // Attributes table
         $sql_attributes = "CREATE TABLE IF NOT EXISTS {$attributes_table} (
             id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            phone_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
             attribute_name VARCHAR(255) NOT NULL,
             discount_type ENUM('fixed','percentage') NOT NULL DEFAULT 'fixed',
-            PRIMARY KEY (id)
+            PRIMARY KEY (id),
+            INDEX (phone_id)
         ) {$wpdb->get_charset_collate()};";
         dbDelta($sql_attributes);
 
@@ -75,6 +75,17 @@ class Phone_Price_Estimator {
             INDEX (attribute_id)
         ) {$wpdb->get_charset_collate()};";
         dbDelta($sql_options);
+
+        // New: Evaluation Criteria table
+        $sql_criteria = "CREATE TABLE IF NOT EXISTS {$criteria_table} (
+            id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            criteria_text VARCHAR(255) NOT NULL,
+            discount_value DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+            applicable_brands TEXT NOT NULL,
+            active TINYINT(1) NOT NULL DEFAULT 1,
+            PRIMARY KEY (id)
+        ) {$wpdb->get_charset_collate()};";
+        dbDelta($sql_criteria);
     }
 
     /**
@@ -85,6 +96,7 @@ class Phone_Price_Estimator {
         $wpdb->query( "DROP TABLE IF EXISTS {$wpdb->prefix}" . self::$devices_table );
         $wpdb->query( "DROP TABLE IF EXISTS {$wpdb->prefix}" . self::$attributes_table );
         $wpdb->query( "DROP TABLE IF EXISTS {$wpdb->prefix}" . self::$attr_options_table );
+        $wpdb->query( "DROP TABLE IF EXISTS {$wpdb->prefix}phone_price_estimator_criteria" );
     }
 
     /**
@@ -93,35 +105,78 @@ class Phone_Price_Estimator {
     public static function get_devices( $search_term = '' ) {
         global $wpdb;
         $devices_table = $wpdb->prefix . self::$devices_table;
-        
-        if ( ! empty( $search_term ) ) {
-            $like = '%' . $wpdb->esc_like( $search_term ) . '%';
-            $sql  = $wpdb->prepare(
-                "SELECT * FROM $devices_table 
-                 WHERE device_name LIKE %s 
-                 ORDER BY device_name ASC", 
-                $like
-            );
-        } else {
-            $sql = "SELECT * FROM $devices_table ORDER BY device_name ASC";
+
+        $cache_key = 'ppe_devices_' . md5($search_term);
+        $devices   = get_transient($cache_key);
+
+        if ( false === $devices ) {
+            if ( ! empty( $search_term ) ) {
+                $like = '%' . $wpdb->esc_like( $search_term ) . '%';
+                $sql  = $wpdb->prepare(
+                    "SELECT * FROM $devices_table 
+                     WHERE device_name LIKE %s 
+                     ORDER BY device_name ASC", 
+                    $like
+                );
+            } else {
+                $sql = "SELECT * FROM $devices_table ORDER BY device_name ASC";
+            }
+            $devices = $wpdb->get_results($sql);
+            
+    $devices = array_map(function($device) {
+        return (object) array(
+            'id' => intval($device->id),
+            'device_name' => esc_html($device->device_name),
+            'brand' => esc_html($device->brand),
+        );
+    }, $devices);
+    set_transient($cache_key, $devices, 3600);
+    
         }
-        return $wpdb->get_results($sql);
+
+        return $devices;
     }
 
     /**
-     * Get all attributes with their options.
+     * Clear any devices cache.
      */
-    public static function get_all_attributes() {
+    public static function clear_devices_cache() {
+        global $wpdb;
+        $transients = $wpdb->get_col("SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE '%_transient_ppe_devices_%'");
+        foreach ( $transients as $option_name ) {
+            $transient_key = str_replace('_transient_', '', $option_name);
+            delete_transient($transient_key);
+        }
+    }
+
+    /**
+     * (Optional) Clear criteria cache.
+     *
+     * Dacă folosești transient caching pentru criterii, implementează aici.
+     */
+    public static function clear_criteria_cache() {
+        // Pentru moment, nu avem caching dedicat pentru criterii.
+        // Poți adăuga ștergerea transientelor aferente, dacă implementezi caching.
+    }
+
+    /**
+     * Get attributes and options for a given device.
+     */
+    public static function get_attributes_by_device( $device_id ) {
         global $wpdb;
         $attributes_table = $wpdb->prefix . self::$attributes_table;
         $options_table    = $wpdb->prefix . self::$attr_options_table;
 
-        // Get attributes
-        $attributes = $wpdb->get_results("SELECT * FROM $attributes_table");
+        $sql = $wpdb->prepare(
+            "SELECT * FROM $attributes_table
+             WHERE phone_id = %d
+             ORDER BY id ASC",
+            $device_id
+        );
+        $attributes = $wpdb->get_results($sql);
         if ( ! $attributes ) {
             return array();
         }
-        // For each attribute, get options
         foreach ( $attributes as $attr ) {
             $attr->options = $wpdb->get_results(
                 $wpdb->prepare(
@@ -134,74 +189,51 @@ class Phone_Price_Estimator {
     }
 
     /**
-     * Calculate the final price given the device and user-selected options.
+     * Calculate final price using submitted evaluation criteria.
      */
-    public static function calculate_final_price( $device_id, $selected_options = array() ) {
+    public static function calculate_final_price( $device_id, $selected_criteria = array() ) {
         global $wpdb;
         $devices_table = $wpdb->prefix . self::$devices_table;
 
         // Fetch device
-        $device = $wpdb->get_row(
-            $wpdb->prepare(
-                "SELECT * FROM $devices_table WHERE id = %d",
-                $device_id
-            )
-        );
-
+        $device = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $devices_table WHERE id = %d", $device_id ) );
         if ( ! $device ) {
             return 0; // Device not found
         }
 
-        $base_price  = floatval( $device->base_price );
+        $base_price  = (float) $device->base_price;
         $final_price = $base_price;
 
-        // Each selected_option is an array: [ 'attribute_id' => X, 'option_id' => Y ]
-        foreach ( $selected_options as $attribute_id => $option_id ) {
-            // Get attribute + option
-            $attribute = self::get_attribute_by_id( $attribute_id );
-            if ( $attribute ) {
-                $option = self::get_option_by_id( $option_id );
-                if ( $option ) {
-                    $discount_type  = $attribute->discount_type;
-                    $discount_value = floatval( $option->discount_value );
-
-                    if ( $discount_type === 'fixed' ) {
-                        // Subtract fixed amount
-                        $final_price -= $discount_value;
-                    } else {
-                        // Percentage discount
-                        $percentage = $discount_value / 100; 
-                        $final_price -= ( $base_price * $percentage );
-                    }
+        // Pentru fiecare criteriu cu răspuns "yes", scade discount-ul asociat
+        foreach ( $selected_criteria as $criteria_id => $answer ) {
+            if ( strtolower($answer) === 'yes' ) {
+                $criterion = $wpdb->get_row( $wpdb->prepare( "SELECT discount_value FROM {$wpdb->prefix}phone_price_estimator_criteria WHERE id = %d", $criteria_id ) );
+                if ( $criterion ) {
+                    $final_price -= (float) $criterion->discount_value;
                 }
             }
         }
-
-        // Ensure final price is never below 0
-        $final_price = max( $final_price, 0 );
-
-        return $final_price;
+        return max( $final_price, 0 );
     }
 
     /**
-     * Get a single attribute by ID (with discount_type).
+     * Get evaluation criteria by brand.
+     *
+     * Returnează rândurile unde applicable_brands este "All" sau conține brand-ul dat.
      */
-    public static function get_attribute_by_id( $attribute_id ) {
+    public static function get_criteria_by_brand( $brand ) {
         global $wpdb;
-        $table = $wpdb->prefix . self::$attributes_table;
-        return $wpdb->get_row(
-            $wpdb->prepare("SELECT * FROM $table WHERE id = %d", $attribute_id)
+        $criteria_table = $wpdb->prefix . 'phone_price_estimator_criteria';
+        $sql = $wpdb->prepare(
+            "SELECT * FROM $criteria_table 
+             WHERE active = 1 AND (applicable_brands = %s OR applicable_brands LIKE %s)
+             ORDER BY id ASC",
+             'All', '%' . $wpdb->esc_like( $brand ) . '%'
         );
+        error_log('Criteria request for brand: ' . $brand);
+        error_log('SQL query: ' . $sql);
+        return $wpdb->get_results($sql);
     }
 
-    /**
-     * Get a single option by ID (with discount_value).
-     */
-    public static function get_option_by_id( $option_id ) {
-        global $wpdb;
-        $table = $wpdb->prefix . self::$attr_options_table;
-        return $wpdb->get_row(
-            $wpdb->prepare("SELECT * FROM $table WHERE id = %d", $option_id)
-        );
-    }
+    // Alte metode (legacy) rămân neschimbate.
 }

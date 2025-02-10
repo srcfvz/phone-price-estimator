@@ -1,22 +1,127 @@
-.ppe-estimator-wrapper {
-    border: 1px solid #ccc;
-    padding: 15px;
-    margin: 10px 0;
-    max-width: 600px;
+/* File: ./assets/ppe-frontend.css */
+
+/* Root variables for easy adjustments */
+:root {
+    --primary-bg: #f7f7ff;         /* Light tint background */
+    --primary-border: #ddd;        /* Light gray border */
+    --primary-color: #333;         /* Main text color */
+    --padding: 20px;
+    --border-radius: 8px;
+    --dropdown-bg: #fff;           /* Autocomplete dropdown background */
+    --dropdown-hover: #e2e8f0;      /* Hover background for dropdown items */
 }
 
+/* Main wrapper styling for the estimator */
+.ppe-estimator-wrapper {
+    background: var(--primary-bg);
+    border: 1px solid var(--primary-border);
+    padding: var(--padding);
+    border-radius: var(--border-radius);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    max-width: 600px;
+    margin: 20px auto;
+    font-family: Arial, sans-serif;
+}
+
+/* Heading style */
+.ppe-estimator-wrapper h3 {
+    margin-top: 0;
+    color: var(--primary-color);
+}
+
+/* Labels for inputs */
 .ppe-estimator-wrapper label {
     display: block;
-    margin-top: 10px;
+    margin-bottom: 5px;
     font-weight: bold;
+    color: var(--primary-color);
 }
 
-.ppe-attribute-block {
-    margin: 10px 0;
+/* Styling text inputs, number inputs, and select dropdowns */
+.ppe-estimator-wrapper input[type="text"],
+.ppe-estimator-wrapper input[type="number"],
+.ppe-estimator-wrapper select {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--primary-border);
+    border-radius: var(--border-radius);
+    margin-bottom: 15px;
+    box-sizing: border-box;
 }
 
+/* Button styling */
+.ppe-estimator-wrapper button {
+    background: #4285f4;
+    color: #fff;
+    border: none;
+    padding: 12px 20px;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 16px;
+    transition: background 0.3s ease;
+}
+
+.ppe-estimator-wrapper button:hover {
+    background: #3367d6;
+}
+
+/* Result container styling */
 #ppe_result_container {
-    margin-top: 20px;
+    background: #e9f5fe;
+    padding: 15px;
+    border: 1px solid #bcdff1;
+    border-radius: var(--border-radius);
     font-size: 1.2em;
     font-weight: bold;
+    color: var(--primary-color);
+    margin-top: 20px;
+}
+
+/* Styling for each attribute block */
+.ppe-attribute-block {
+    margin-bottom: 15px;
+}
+
+/* --- New/Updated CSS for jQuery UI Autocomplete Dropdown --- */
+
+/* Autocomplete container */
+.ui-autocomplete {
+    max-height: 250px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0;
+    background: var(--dropdown-bg);
+    border: 1px solid var(--primary-border);
+    border-radius: var(--border-radius);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    z-index: 1000;
+}
+
+/* Remove default padding/margin on the list */
+.ui-menu {
+    padding: 0;
+    margin: 0;
+}
+
+/* Autocomplete menu items */
+.ui-menu-item {
+    list-style: none;
+    padding: 10px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 14px;
+}
+
+/* Hover and active state for menu items */
+.ui-menu-item:hover,
+.ui-state-active {
+    background: var(--dropdown-hover);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .ppe-estimator-wrapper {
+        padding: 15px;
+        margin: 15px;
+    }
 }

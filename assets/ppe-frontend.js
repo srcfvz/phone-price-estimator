@@ -1,27 +1,30 @@
 jQuery(document).ready(function($) {
-
     const $deviceSearch = $('#ppe_device_search');
     const $selectedDeviceId = $('#ppe_selected_device_id');
+    const $selectedDeviceBrand = $('#ppe_selected_device_brand');
     const $attributesContainer = $('#ppe-attributes-container');
+    const $criteriaContainer = $('#ppe-criteria-container');
     const $estimatedPrice = $('#ppe_estimated_price');
 
-    // You could show a loader/spinner if you wish:
-    // (Assume there's a hidden loader in HTML with ID #ppe_loader)
-    // For now let's skip a visible loader to keep it simple.
-
-    // Debounce function for autocomplete
-    function debounce(func, delay) {
+    // Debounce utility
+    const debounce = (func, delay) => {
         let timeout;
-        return function(...args) {
+        return (...args) => {
             clearTimeout(timeout);
             timeout = setTimeout(() => func.apply(this, args), delay);
         };
-    }
+    };
+
+    // Cache for search results
+    let deviceCache = {};
 
     function initDeviceAutocomplete() {
         $deviceSearch.autocomplete({
             source: debounce(function(request, response) {
-                // Show loader if needed
+                if (deviceCache[request.term]) {
+                    response(deviceCache[request.term]);
+                    return;
+                }
                 $.ajax({
                     url: ppe_ajax_obj.ajax_url,
                     method: 'POST',
@@ -32,39 +35,89 @@ jQuery(document).ready(function($) {
                         _ajax_nonce: ppe_ajax_obj.nonce
                     },
                     success: function(data) {
-                        if (data && data.length > 0) {
-                            response(data.map(item => ({
-                                label: `${item.device_name} (${item.brand || ''})`,
-                                value: item.value,
-                                device_id: item.device_id
-                            })));
-                        } else {
-                            response([{ label: 'No devices found', value: '' }]);
-                        }
+                        const results = data && data.length > 0
+                            ? data.map(item => ({
+                                  label: `${item.label} (${item.brand || ''})`,
+                                  value: item.value,
+                                  device_id: item.device_id,
+                                  brand: item.brand
+                              }))
+                            : [{ label: 'No devices found', value: '' }];
+                        deviceCache[request.term] = results;
+                        response(results);
                     },
-                    error: function(xhr, status, error) {
-                        console.error('Autocomplete error:', error);
-                        response([{ label: 'Error searching devices', value: '' }]);
-                    },
-                    complete: function() {
-                        // Hide loader if needed
+                    
+    error: function(xhr, status, error) {
+        console.error('AJAX Error:', error);
+    
+                        response([{ label: `Error: ${xhr.statusText}`, value: '' }]);
                     }
                 });
-            }, 300), // Debounce
+            }, 200),
             minLength: 2,
             select: function(event, ui) {
                 if (ui.item && ui.item.device_id) {
                     $selectedDeviceId.val(ui.item.device_id);
-                    calculatePrice();
+                    $selectedDeviceBrand.val(ui.item.brand);
+
+                    // Load evaluation criteria for the selected brand
+                    loadCriteriaForBrand(ui.item.brand);
+
+                    // Optionally, load attributes for the device
+                    loadAttributesForDevice(ui.item.device_id);
+
+                    $estimatedPrice.text('');
                 } else {
                     $selectedDeviceId.val('');
+                    $selectedDeviceBrand.val('');
+                    $criteriaContainer.empty();
+                    $attributesContainer.empty();
                     $estimatedPrice.text('');
                 }
             }
-        }).focus(function() {
-            const val = $(this).val();
-            if (val === 'No devices found' || val === 'Error searching devices') {
-                $(this).val('');
+        });
+    }
+
+    function loadAttributesForDevice(deviceId) {
+        $attributesContainer.html('<p>Loading attributes...</p>');
+        $.ajax({
+            url: ppe_ajax_obj.ajax_url,
+            method: 'POST',
+            dataType: 'json',
+            data: {
+                action: 'ppe_get_attributes_by_device',
+                device_id: deviceId,
+                _ajax_nonce: ppe_ajax_obj.nonce
+            },
+            success: function(res) {
+                $attributesContainer.html(res.success && res.data.html ? res.data.html : '<p>No attributes found.</p>');
+            },
+            error: function() {
+                $attributesContainer.html('<p>Error loading attributes.</p>');
+            }
+        });
+    }
+
+    function loadCriteriaForBrand(brand) {
+        $criteriaContainer.html('<p>Loading evaluation criteria...</p>');
+        $.ajax({
+            url: ppe_ajax_obj.ajax_url,
+            method: 'POST',
+            dataType: 'json',
+            data: {
+                action: 'ppe_get_criteria_by_brand',
+                brand: brand,
+                _ajax_nonce: ppe_ajax_obj.nonce
+            },
+            success: function(res) {
+                if (res.success && res.data && res.data.html) {
+                    $criteriaContainer.html(res.data.html);
+                } else {
+                    $criteriaContainer.html('<p>No criteria found.</p>');
+                }
+            },
+            error: function() {
+                $criteriaContainer.html('<p>Error loading criteria.</p>');
             }
         });
     }
@@ -75,18 +128,25 @@ jQuery(document).ready(function($) {
             $estimatedPrice.text('Please select a device.');
             return;
         }
-
-        const selected_attr = {};
-        $attributesContainer.find('select').each(function() {
-            const attr_id = $(this).data('attribute-id');
-            const opt_id = $(this).val();
-            if (opt_id) {
-                selected_attr[attr_id] = opt_id;
-            }
+        
+        // Collect criteria responses
+        const criteriaResponses = {};
+        $criteriaContainer.find('.ppe-criteria-block').each(function() {
+            const nameAttr = $(this).find('input[type="radio"]').attr('name');
+            // name is in format "criteria_<ID>"
+            
+    if (nameAttr && nameAttr.includes('_')) {
+        const criteriaId = nameAttr.split('_')[1];
+        const answer = $(this).find('input[type="radio"]:checked').val() || 'no';
+        criteriaResponses[criteriaId] = answer;
+    }
+    
+            const answer = $(this).find('input[type="radio"]:checked').val();
+            criteriaResponses[criteriaId] = answer;
         });
-
+        
         $estimatedPrice.text('Calculating...');
-
+        
         $.ajax({
             url: ppe_ajax_obj.ajax_url,
             method: 'POST',
@@ -94,31 +154,21 @@ jQuery(document).ready(function($) {
             data: {
                 action: 'ppe_calculate_price',
                 device_id: device_id,
-                selected_attr: selected_attr,
+                selected_criteria: criteriaResponses,
                 _ajax_nonce: ppe_ajax_obj.nonce
             },
             success: function(res) {
-                if (res && res.success && res.data && typeof res.data.final_price !== 'undefined') {
-                    $estimatedPrice.text(res.data.final_price);
-                } else {
-                    $estimatedPrice.text('Error calculating price.');
-                    console.error('Unexpected response:', res);
-                }
+                $estimatedPrice.text(res?.data?.final_price ?? 'Error calculating price.');
             },
-            error: function(xhr, status, error) {
-                $estimatedPrice.text('Error: ' + error);
-                console.error('AJAX error:', status, error);
+            
+    error: function(xhr, status, error) {
+        console.error('AJAX Error:', error);
+    
+                $estimatedPrice.text(`Error: ${xhr.statusText}`);
             }
         });
     }
 
-    // Initialize
     initDeviceAutocomplete();
-
-    // Manual button
     $('#ppe_calculate_btn').on('click', calculatePrice);
-
-    // Recalculate on any attribute change
-    $attributesContainer.on('change', 'select', calculatePrice);
-
 });
